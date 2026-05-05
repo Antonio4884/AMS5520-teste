@@ -1,18 +1,16 @@
 import React, { useEffect, useState } from "react";
 
-// 🔥 NORMALIZA QUALQUER FORMATO DE PORTA
+// ---------------- NORMALIZA PORTA ----------------
 function normalizarPorta(p) {
   return (p || "")
     .replace(/\s+/g, "")
     .replace(/\r/g, "")
-    .replace(/\n/g, "")
     .trim();
 }
 
-function analisar({ olt, porta, indexPorta, hht }) {
-  if (!olt || !porta) {
-    return "Preencha OLT e PORTA.";
-  }
+// ---------------- ANALISA REGRA ----------------
+function analisar({ olt, porta, indexBase }) {
+  if (!olt || !porta) return "Preencha OLT e PORTA.";
 
   const olts = olt
     .split(",")
@@ -28,68 +26,63 @@ function analisar({ olt, porta, indexPorta, hht }) {
   const linhasSecundaria = [];
 
   portas.forEach((p) => {
-    const partes = p.split("/").map((x) => x.trim());
-
-    if (partes.length < 4) return;
+    const partes = normalizarPorta(p).split("/");
 
     const lt = partes[2];
     const pon = partes[3];
     const ont = partes[4];
 
-    // 🔥 BUSCA NORMALIZADA
-    const idImplantacao =
-      indexPorta[normalizarPorta(p)] || "SEM ID IMPLANTAÇÃO";
+    const isSecundaria = partes.length === 5;
 
-    // ---------------- PRIMÁRIA ----------------
-    if (!ont) {
-      olts.forEach((o) => {
+    olts.forEach((o) => {
+      const chave = `${o}|${partes.join("/")}`;
+      const base = indexBase[chave];
+
+      // ---------------- PRIMÁRIA ----------------
+      if (!isSecundaria) {
+        const idImplantacao =
+          base?.idImplantacao || "SEM ID IMPLANTAÇÃO";
+
         linhasPrimaria.push(
           `${o}:R1.S1.LT${lt}.PON${pon} - ${idImplantacao}`
         );
-      });
-    }
+      }
 
-    // ---------------- SECUNDÁRIA ----------------
-    if (ont) {
-      linhasSecundaria.push(
-        `${olts[0]}:R1.S1.LT${lt}.PON${pon}.ONT${ont}`
-      );
-    }
+      // ---------------- SECUNDÁRIA ----------------
+      if (isSecundaria) {
+        const customerId =
+          base?.customerId || "SEM CUSTOMER ID";
+
+        linhasSecundaria.push(
+          `${o}:R1.S1.LT${lt}.PON${pon}.ONT${ont} - ${customerId}`
+        );
+      }
+    });
   });
 
-  // ---------------- SAÍDA PRIMÁRIA ----------------
-  if (linhasPrimaria.length > 0 && linhasSecundaria.length === 0) {
-    return `Indisponibilidade em rede PRIMARIA:
-GPON: ${olts.join(", ")}
-
-
-${linhasPrimaria.join("\n")}`;
-  }
-
-  // ---------------- SAÍDA SECUNDÁRIA ----------------
   if (linhasSecundaria.length > 0) {
     return `Indisponibilidade em rede SECUNDARIA - Com afetação
 GPON: ${olts.join(", ")}
 
-
-${linhasSecundaria.join("\n")}
-
-HHT-AFETADOS:
-${hht || "NÃO INFORMADO"}`;
+${linhasSecundaria.join("\n")}`;
   }
 
-  return "Não foi possível identificar o tipo de alarme.";
+  return `Indisponibilidade em rede PRIMARIA:
+GPON: ${olts.join(", ")}
+
+
+${linhasPrimaria.join("\n")}`;
 }
 
+// ---------------- APP ----------------
 export default function App() {
   const [olt, setOlt] = useState("");
   const [porta, setPorta] = useState("");
-  const [hht, setHht] = useState("");
   const [saida, setSaida] = useState("");
 
-  const [indexPorta, setIndexPorta] = useState({});
+  const [indexBase, setIndexBase] = useState({});
 
-  // ---------------- CARREGAR CSV ----------------
+  // ---------------- CARREGAR PLANILHA ----------------
   useEffect(() => {
     async function carregarCSV() {
       const response = await fetch("/Base_clientes_Horizon.csv");
@@ -104,19 +97,26 @@ export default function App() {
         const valores = linha.split(",");
         const obj = {};
 
-        headers.forEach((header, i) => {
-          obj[header.trim()] = (valores[i] || "").trim();
+        headers.forEach((h, i) => {
+          obj[h.trim()] = (valores[i] || "").trim();
         });
 
+        const olt = obj["OLT"];
         const porta = obj["Porta"];
-        const id = obj["ID Implantação"];
+        const idImplantacao = obj["ID Implantação"];
+        const customerId = obj["Customer ID"];
 
-        if (porta) {
-          index[normalizarPorta(porta)] = id;
-        }
+        if (!olt || !porta) return;
+
+        const chave = `${olt.toUpperCase()}|${normalizarPorta(porta)}`;
+
+        index[chave] = {
+          idImplantacao,
+          customerId,
+        };
       });
 
-      setIndexPorta(index);
+      setIndexBase(index);
     }
 
     carregarCSV();
@@ -124,32 +124,25 @@ export default function App() {
 
   return (
     <div style={{ padding: 20, fontFamily: "Arial" }}>
-      <h2>Gerador de Carimbo NOC</h2>
+      <h2>Gerador NOC - AMS5520</h2>
 
       <input
-        placeholder="OLT (ex: OLTCTA21, OLTCTA22)"
+        placeholder="OLT (ex: OLTCTA11, OLTCTA22)"
         value={olt}
         onChange={(e) => setOlt(e.target.value)}
         style={{ width: "100%", marginBottom: 10 }}
       />
 
       <textarea
-        placeholder="PORTA (ex: 1/1/15/7 ou várias linhas)"
+        placeholder="PORTA (ex: 1/1/9/4 ou 1/1/9/4/5)"
         value={porta}
         onChange={(e) => setPorta(e.target.value)}
         style={{ width: "100%", height: 120, marginBottom: 10 }}
       />
 
-      <textarea
-        placeholder="HHT afetados (secundária)"
-        value={hht}
-        onChange={(e) => setHht(e.target.value)}
-        style={{ width: "100%", height: 120, marginBottom: 10 }}
-      />
-
       <button
         onClick={() =>
-          setSaida(analisar({ olt, porta, indexPorta, hht }))
+          setSaida(analisar({ olt, porta, indexBase }))
         }
       >
         Gerar
