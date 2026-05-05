@@ -1,16 +1,18 @@
 import React, { useEffect, useState } from "react";
 
-// ---------------- NORMALIZA PORTA ----------------
+// 🔥 NORMALIZA QUALQUER FORMATO DE PORTA
 function normalizarPorta(p) {
   return (p || "")
     .replace(/\s+/g, "")
     .replace(/\r/g, "")
+    .replace(/\n/g, "")
     .trim();
 }
 
-// ---------------- ANALISA REGRA ----------------
-function analisar({ olt, porta, indexBase }) {
-  if (!olt || !porta) return "Preencha OLT e PORTA.";
+function analisar({ olt, porta, indexPorta, hht }) {
+  if (!olt || !porta) {
+    return "Preencha OLT e PORTA.";
+  }
 
   const olts = olt
     .split(",")
@@ -26,63 +28,77 @@ function analisar({ olt, porta, indexBase }) {
   const linhasSecundaria = [];
 
   portas.forEach((p) => {
-    const partes = normalizarPorta(p).split("/");
+    const partes = p.split("/").map((x) => x.trim());
+
+    if (partes.length < 4) return;
 
     const lt = partes[2];
     const pon = partes[3];
     const ont = partes[4];
 
-    const isSecundaria = partes.length === 5;
+    const isSecundaria = partes.length >= 5;
 
-    olts.forEach((o) => {
-      const chave = `${o}|${partes.join("/")}`;
-      const base = indexBase[chave];
+    // 🔑 chave normalizada (PRIMÁRIA OU SECUNDÁRIA)
+    const portaKey = normalizarPorta(
+      isSecundaria
+        ? `${partes[0]}/${partes[1]}/${partes[2]}/${partes[3]}/${partes[4]}`
+        : `${partes[0]}/${partes[1]}/${partes[2]}/${partes[3]}`
+    );
 
-      // ---------------- PRIMÁRIA ----------------
-      if (!isSecundaria) {
-        const idImplantacao =
-          base?.idImplantacao || "SEM ID IMPLANTAÇÃO";
+    const dadosCliente = indexPorta[portaKey] || {};
+    const idImplantacao = dadosCliente.idImplantacao || "SEM ID IMPLANTAÇÃO";
+    const customerId = dadosCliente.customerId || "SEM CUSTOMER ID";
 
+    // ---------------- PRIMÁRIA ----------------
+    if (!isSecundaria) {
+      olts.forEach((o) => {
         linhasPrimaria.push(
           `${o}:R1.S1.LT${lt}.PON${pon} - ${idImplantacao}`
         );
-      }
+      });
+    }
 
-      // ---------------- SECUNDÁRIA ----------------
-      if (isSecundaria) {
-        const customerId =
-          base?.customerId || "SEM CUSTOMER ID";
-
-        linhasSecundaria.push(
-          `${o}:R1.S1.LT${lt}.PON${pon}.ONT${ont} - ${customerId}`
-        );
-      }
-    });
+    // ---------------- SECUNDÁRIA ----------------
+    if (isSecundaria) {
+      linhasSecundaria.push(
+        `${olts[0]}:R1.S1.LT${lt}.PON${pon}.ONT${ont} - ${customerId}`
+      );
+    }
   });
 
-  if (linhasSecundaria.length > 0) {
-    return `Indisponibilidade em rede SECUNDARIA - Com afetação
-GPON: ${olts.join(", ")}
-
-${linhasSecundaria.join("\n")}`;
-  }
-
-  return `Indisponibilidade em rede PRIMARIA:
+  // ---------------- SAÍDA PRIMÁRIA ----------------
+  if (linhasPrimaria.length > 0 && linhasSecundaria.length === 0) {
+    return `Indisponibilidade em rede PRIMARIA:
 GPON: ${olts.join(", ")}
 
 
 ${linhasPrimaria.join("\n")}`;
+  }
+
+  // ---------------- SAÍDA SECUNDÁRIA ----------------
+  if (linhasSecundaria.length > 0) {
+    return `Indisponibilidade em rede SECUNDARIA - Com afetação
+GPON: ${olts.join(", ")}
+
+
+${linhasSecundaria.join("\n")}
+
+HHT-AFETADOS:
+${hht || "NÃO INFORMADO"}`;
+  }
+
+  return "Não foi possível identificar o tipo de alarme.";
 }
 
-// ---------------- APP ----------------
 export default function App() {
   const [olt, setOlt] = useState("");
   const [porta, setPorta] = useState("");
+  const [hht, setHht] = useState("");
   const [saida, setSaida] = useState("");
 
-  const [indexBase, setIndexBase] = useState({});
+  const [indexPorta, setIndexPorta] = useState({});
 
-  // ---------------- CARREGAR PLANILHA ----------------
+  // ---------------- CARREGAR CSV ----------------
   useEffect(() => {
     async function carregarCSV() {
       const response = await fetch("/Base_clientes_Horizon.csv");
@@ -97,26 +113,23 @@ export default function App() {
         const valores = linha.split(",");
         const obj = {};
 
-        headers.forEach((h, i) => {
-          obj[h.trim()] = (valores[i] || "").trim();
+        headers.forEach((header, i) => {
+          obj[header.trim()] = (valores[i] || "").trim();
         });
 
-        const olt = obj["OLT"];
         const porta = obj["Porta"];
         const idImplantacao = obj["ID Implantação"];
         const customerId = obj["Customer ID"];
 
-        if (!olt || !porta) return;
-
-        const chave = `${olt.toUpperCase()}|${normalizarPorta(porta)}`;
-
-        index[chave] = {
-          idImplantacao,
-          customerId,
-        };
+        if (porta) {
+          index[normalizarPorta(porta)] = {
+            idImplantacao,
+            customerId,
+          };
+        }
       });
 
-      setIndexBase(index);
+      setIndexPorta(index);
     }
 
     carregarCSV();
@@ -124,27 +137,30 @@ export default function App() {
 
   return (
     <div style={{ padding: 20, fontFamily: "Arial" }}>
-      <h2>Gerador NOC - AMS5520</h2>
+      <h2>Gerador de Carimbo NOC</h2>
 
       <input
-        placeholder="OLT (ex: OLTCTA11, OLTCTA22)"
+        placeholder="OLT (ex: OLTCTA21, OLTCTA22)"
         value={olt}
         onChange={(e) => setOlt(e.target.value)}
         style={{ width: "100%", marginBottom: 10 }}
       />
 
       <textarea
-        placeholder="PORTA (ex: 1/1/9/4 ou 1/1/9/4/5)"
+        placeholder="PORTA (ex: 1/1/15/7 ou 1/1/15/7/10)"
         value={porta}
         onChange={(e) => setPorta(e.target.value)}
         style={{ width: "100%", height: 120, marginBottom: 10 }}
       />
 
-      <button
-        onClick={() =>
-          setSaida(analisar({ olt, porta, indexBase }))
-        }
-      >
+      <textarea
+        placeholder="HHT afetados (secundária)"
+        value={hht}
+        onChange={(e) => setHht(e.target.value)}
+        style={{ width: "100%", height: 120, marginBottom: 10 }}
+      />
+
+      <button onClick={() => setSaida(analisar({ olt, porta, indexPorta, hht }))}>
         Gerar
       </button>
 
