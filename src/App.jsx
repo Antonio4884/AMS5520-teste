@@ -195,7 +195,7 @@ export default function App() {
   useEffect(() => {
     async function carregarCSV() {
       try {
-        const response = await fetch("/Base_Cliente.csv");
+        const response = await fetch("/Base_clientes_Horizon.csv");
         const text = await response.text();
 
         const linhas = text.split("\n").filter(Boolean);
@@ -214,7 +214,7 @@ export default function App() {
 
         setDados(rows);
       } catch (error) {
-        console.error(error);
+        console.error("Erro ao carregar CSV:", error);
       }
     }
 
@@ -227,56 +227,86 @@ export default function App() {
   }
 
   async function copiar() {
+    if (!saida) return;
     await navigator.clipboard.writeText(saida);
     alert("Resultado copiado!");
   }
 
   return (
-    <div style={{ padding: 24, fontFamily: "Arial" }}>
-      <h1>📄 NOC Toolkit + AMS5520</h1>
-
-      <textarea
-        value={entrada}
-        onChange={(e) => setEntrada(e.target.value)}
-        placeholder="Cole alarmes ou consulta"
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "#f1f5f9",
+        padding: 24,
+        fontFamily: "Arial",
+      }}
+    >
+      <div
         style={{
-          width: "100%",
-          height: 180,
-          marginBottom: 16,
-          padding: 12,
+          maxWidth: 1100,
+          margin: "0 auto",
+          background: "white",
+          padding: 24,
+          borderRadius: 16,
+          boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
         }}
-      />
+      >
+        <h1 style={{ marginBottom: 20 }}>📡 NOC Toolkit + AMS5520</h1>
 
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <button onClick={() => setSaida(gerarCarimbo(entrada))}>
-          Gerar Carimbo
-        </button>
+        <textarea
+          value={entrada}
+          onChange={(e) => setEntrada(e.target.value)}
+          placeholder="Cole alarmes, logs ou consultas"
+          style={{
+            width: "100%",
+            height: 180,
+            padding: 12,
+            borderRadius: 8,
+            border: "1px solid #ccc",
+            marginBottom: 20,
+          }}
+        />
 
-        <button onClick={() => setSaida(analisarAlarmes(entrada))}>
-          Analisar Alarmes
-        </button>
+        <div
+          style={{
+            display: "flex",
+            gap: 12,
+            flexWrap: "wrap",
+            marginBottom: 20,
+          }}
+        >
+          <button onClick={() => setSaida(gerarCarimbo(entrada))}>
+            📄 Gerar Carimbo
+          </button>
 
-        <button onClick={() => setSaida(analisarPrimaria(entrada, dados))}>
-          Analisar Primária
-        </button>
+          <button onClick={() => setSaida(analisarAlarmes(entrada))}>
+            📊 Analisar Alarmes
+          </button>
 
-        <button onClick={copiar}>📋 Copiar</button>
-        <button onClick={limpar}>🗑️ Limpar</button>
+          <button onClick={() => setSaida(analisarPrimaria(entrada, dados))}>
+            🌐 Analisar Primária
+          </button>
+
+          <button onClick={copiar}>📋 Copiar</button>
+          <button onClick={limpar}>🗑️ Limpar</button>
+        </div>
+
+        <textarea
+          value={saida}
+          readOnly
+          placeholder="Resultado aparecerá aqui"
+          style={{
+            width: "100%",
+            height: 420,
+            padding: 12,
+            borderRadius: 8,
+            border: "1px solid #ccc",
+            background: "#000",
+            color: "#00ff88",
+            fontFamily: "monospace",
+          }}
+        />
       </div>
-
-      <textarea
-        value={saida}
-        readOnly
-        style={{
-          width: "100%",
-          height: 400,
-          marginTop: 20,
-          background: "#000",
-          color: "#00ff88",
-          padding: 12,
-          fontFamily: "monospace",
-        }}
-      />
     </div>
   );
 }
