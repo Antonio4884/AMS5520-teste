@@ -1,63 +1,92 @@
 import React, { useEffect, useState } from "react";
 
-function extrairDadosGPON(texto) {
-  const regex = /(OLT[A-Z0-9]+):R1\.S1\.(LT\d+)\.(PON\d+)/i;
-  const match = texto.match(regex);
+function extrairInfo(texto) {
+  const primaria =
+    texto.match(/PON Port:(OLT[A-Z0-9]+):R1\.S1\.(LT\d+)\.(PON\d+)/i);
 
-  if (!match) return null;
-
-  return {
-    olt: match[1].toUpperCase(),
-    lt: match[2].toUpperCase(),
-    pon: match[3].toUpperCase(),
-  };
-}
-
-function analisarAlarme(texto, dados) {
-  const info = extrairDadosGPON(texto);
-
-  if (!info) {
-    return "Não foi possível identificar OLT/LT/PON.";
+  if (primaria) {
+    return {
+      tipo: "PRIMARIA",
+      olt: primaria[1].toUpperCase(),
+      lt: primaria[2].replace("LT", ""),
+      pon: primaria[3].replace("PON", ""),
+      ont: null,
+    };
   }
 
-  const { olt, lt, pon } = info;
+  const secundaria =
+    texto.match(
+      /ONT:(OLT[A-Z0-9]+):R1\.S1\.(LT\d+)\.(PON\d+)\.(ONT\d+)/i
+    );
 
-  const numeroLT = lt.replace("LT", "");
-  const numeroPON = pon.replace("PON", "");
+  if (secundaria) {
+    return {
+      tipo: "SECUNDARIA",
+      olt: secundaria[1].toUpperCase(),
+      lt: secundaria[2].replace("LT", ""),
+      pon: secundaria[3].replace("PON", ""),
+      ont: secundaria[4].replace("ONT", ""),
+    };
+  }
+
+  return null;
+}
+
+function analisar(texto, dados) {
+  const info = extrairInfo(texto);
+
+  if (!info) {
+    return "Não foi possível identificar o alarme.";
+  }
+
+  const { tipo, olt, lt, pon, ont } = info;
 
   const encontrados = dados.filter((item) => {
     const oltItem = (item["OLT"] || "").toUpperCase();
-    const porta = (item["Porta"] || "").toUpperCase();
+    const porta = (item["Porta"] || "").trim();
 
-    return (
-      oltItem === olt &&
-      porta.includes(`/${numeroLT}/`) &&
-      porta.includes(`/${numeroPON}`)
-    );
+    if (oltItem !== olt) return false;
+
+    const partesPorta = porta.split("/");
+
+    if (tipo === "PRIMARIA") {
+      return partesPorta[2] === lt && partesPorta[3] === pon;
+    }
+
+    if (tipo === "SECUNDARIA") {
+      return (
+        partesPorta[2] === lt &&
+        partesPorta[3] === pon &&
+        partesPorta[4] === ont
+      );
+    }
+
+    return false;
   });
 
   if (!encontrados.length) {
-    return `Nenhuma correspondência encontrada para:
-${olt} ${lt} ${pon}`;
+    return `Indisponibilidade em rede ${tipo}:
+GPON: ${olt}
+
+Nenhuma correspondência encontrada.`;
   }
 
-  const implantacoes = encontrados.map(
-    (item) => item["ID Implantação"] || "SEM ID IMPLANTAÇÃO"
-  );
+  const linhas = encontrados
+    .map((item) => {
+      const implantacao = item["ID Implantação"] || "SEM ID IMPLANTAÇÃO";
 
-  const descricao = [...new Set(implantacoes)].join("\n");
+      if (tipo === "PRIMARIA") {
+        return `${olt}:R1.S1.LT${lt}.PON${pon} - ${implantacao}`;
+      }
 
-  const tipo = texto.includes("ONT:")
-    ? "SECUNDARIA"
-    : texto.includes("PON Port:")
-    ? "PRIMARIA"
-    : "GPON";
+      return `${olt}:R1.S1.LT${lt}.PON${pon}.ONT${ont} - ${implantacao}`;
+    })
+    .join("\n");
 
   return `Indisponibilidade em rede ${tipo}:
 GPON: ${olt}
 
-
-${olt}:R1.S1.${lt}.${pon} - ${descricao}`;
+${linhas}`;
 }
 
 export default function App() {
@@ -67,104 +96,76 @@ export default function App() {
 
   useEffect(() => {
     async function carregarCSV() {
-      try {
-        const response = await fetch("/Base_clientes_Horizon.csv");
-        const text = await response.text();
+      const response = await fetch("/Base_clientes_Horizon.csv");
+      const text = await response.text();
 
-        const linhas = text.split("\n").filter(Boolean);
-        const headers = linhas[0].split(",");
+      const linhas = text.split("\n").filter(Boolean);
+      const headers = linhas[0].split(",");
 
-        const rows = linhas.slice(1).map((linha) => {
-          const valores = linha.split(",");
-          const obj = {};
+      const rows = linhas.slice(1).map((linha) => {
+        const valores = linha.split(",");
+        const obj = {};
 
-          headers.forEach((header, index) => {
-            obj[header.trim()] = (valores[index] || "").trim();
-          });
-
-          return obj;
+        headers.forEach((header, index) => {
+          obj[header.trim()] = (valores[index] || "").trim();
         });
 
-        setDados(rows);
-      } catch (error) {
-        console.error(error);
-      }
+        return obj;
+      });
+
+      setDados(rows);
     }
 
     carregarCSV();
   }, []);
 
-  function processar() {
-    setSaida(analisarAlarme(entrada, dados));
-  }
-
-  function limpar() {
-    setEntrada("");
-    setSaida("");
-  }
-
-  async function copiar() {
-    if (!saida) return;
-    await navigator.clipboard.writeText(saida);
-    alert("Resultado copiado!");
-  }
-
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#f1f5f9",
-        padding: 24,
-        fontFamily: "Arial",
-      }}
-    >
-      <div
-        style={{
-          maxWidth: 1000,
-          margin: "0 auto",
-          background: "white",
-          padding: 24,
-          borderRadius: 16,
-          boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
-        }}
-      >
-        <h1>AMS5520 / Horizon</h1>
+    <div style={{ padding: 24, fontFamily: "Arial" }}>
+      <h1>AMS5520 / Horizon</h1>
 
-        <textarea
-          value={entrada}
-          onChange={(e) => setEntrada(e.target.value)}
-          placeholder="Cole alarmes GPON aqui"
-          style={{
-            width: "100%",
-            height: 200,
-            padding: 12,
-            borderRadius: 8,
-            border: "1px solid #ccc",
-            marginBottom: 20,
+      <textarea
+        value={entrada}
+        onChange={(e) => setEntrada(e.target.value)}
+        style={{ width: "100%", height: 200 }}
+        placeholder="Cole aqui o alarme"
+      />
+
+      <div style={{ marginTop: 10, display: "flex", gap: 10 }}>
+        <button onClick={() => setSaida(analisar(entrada, dados))}>
+          Pesquisar
+        </button>
+
+        <button
+          onClick={() => {
+            navigator.clipboard.writeText(saida);
+            alert("Copiado!");
           }}
-        />
+        >
+          Copiar
+        </button>
 
-        <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
-          <button onClick={processar}>Pesquisar</button>
-          <button onClick={copiar}>📋 Copiar</button>
-          <button onClick={limpar}>🗑️ Limpar</button>
-        </div>
-
-        <textarea
-          value={saida}
-          readOnly
-          style={{
-            width: "100%",
-            height: 320,
-            padding: 12,
-            borderRadius: 8,
-            border: "1px solid #ccc",
-            background: "#000",
-            color: "#00ff88",
-            fontFamily: "monospace",
+        <button
+          onClick={() => {
+            setEntrada("");
+            setSaida("");
           }}
-        />
+        >
+          Limpar
+        </button>
       </div>
+
+      <textarea
+        value={saida}
+        readOnly
+        style={{
+          width: "100%",
+          height: 300,
+          marginTop: 20,
+          background: "#000",
+          color: "#00ff88",
+          fontFamily: "monospace",
+        }}
+      />
     </div>
   );
 }
