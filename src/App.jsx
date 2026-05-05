@@ -1,152 +1,11 @@
 import React, { useEffect, useState } from "react";
 
-function gerarCarimbo(texto) {
-  try {
-    const textoLimpo = texto.replace(/<!--.*?-->/g, "");
-
-    const partes = textoLimpo
-      .split(/\t|\n|,/)
-      .map((p) => p.trim())
-      .filter(Boolean);
-
-    let equipamento = "";
-    let dataHora = "";
-    let alarme = "";
-    let ip = "";
-
-    const alarmesConhecidos = [
-      "DEVICE HAS STOPPED RESPONDING TO POLLS",
-      "Communication Failure",
-      "The Device is offline",
-      "Link down",
-      "Link Up",
-      "LOS",
-      "PONLOS",
-    ];
-
-    for (const item of partes) {
-      if (/^\d{1,3}(\.\d{1,3}){3}$/.test(item)) {
-        ip = item;
-        continue;
-      }
-
-      if (
-        item.includes("BRT") ||
-        /\d{1,2}\sde\s.+\s\d{2}:\d{2}:\d{2}/i.test(item)
-      ) {
-        dataHora = item;
-        continue;
-      }
-
-      if (
-        alarmesConhecidos.some((txt) =>
-          item.toUpperCase().includes(txt.toUpperCase())
-        )
-      ) {
-        alarme = item;
-        continue;
-      }
-
-      if (
-        !equipamento &&
-        item !== "No" &&
-        /^[A-Za-z0-9\-_:()./]+$/.test(item) &&
-        !item.includes("Directly Managed") &&
-        !item.includes("EventModel")
-      ) {
-        equipamento = item;
-      }
-    }
-
-    return `.-:CARIMBO DE ABERTURA - NOC:-.
-
-Falha: 
-
-Equipamento: ${equipamento || "N/A"}
-
-Alarme: ${alarme || "N/A"}
-
-Data/Hora: ${dataHora || "N/A"}
-
-IP: ${ip || "N/A"}
-
-Interface: N/A`;
-  } catch {
-    return "Erro ao processar alarme.";
-  }
-}
-
-function analisarAlarmes(texto) {
-  const linhas = texto.split("\n");
-  const grupos = {};
-
-  linhas.forEach((linha) => {
-    if (!linha.trim()) return;
-
-    const partes = linha
-      .split("\t")
-      .map((p) => p.trim())
-      .filter(Boolean);
-
-    let equipamento = null;
-
-    const indiceBRT = partes.findIndex((p) => p.includes("BRT"));
-    if (indiceBRT !== -1 && partes[indiceBRT + 1]) {
-      equipamento = partes[indiceBRT + 1];
-    }
-
-    if (!equipamento && partes.length >= 2) {
-      const candidato = partes[1];
-      if (/^[A-Za-z0-9\-_]+(\(.*\))?$/.test(candidato)) {
-        equipamento = candidato;
-      }
-    }
-
-    if (!equipamento) return;
-
-    let grupo = "OUTROS";
-
-    const parenteses = equipamento.match(/^([A-Za-z0-9]+)\(/);
-    if (parenteses) {
-      grupo = parenteses[1].toUpperCase();
-    } else {
-      const prefixo = equipamento.match(/^([a-zA-Z]+\d*)/);
-      if (prefixo) grupo = prefixo[1].toUpperCase();
-    }
-
-    if (!grupos[grupo]) grupos[grupo] = [];
-    grupos[grupo].push(equipamento);
-  });
-
-  let resultado = "Análise: Possível falha massiva / backbone / gerência\n\n";
-
-  Object.keys(grupos)
-    .sort()
-    .forEach((grupo) => {
-      const equipamentos = [...new Set(grupos[grupo])].sort();
-
-      resultado += `[${grupo}] (${equipamentos.length})\n`;
-
-      for (let i = 0; i < equipamentos.length; i += 4) {
-        resultado +=
-          equipamentos
-            .slice(i, i + 4)
-            .map((e) => e.padEnd(28, " "))
-            .join("") + "\n\n";
-      }
-
-      resultado += "\n";
-    });
-
-  return resultado;
-}
-
 function analisarPrimaria(texto, dados) {
   const regex = /(OLT[A-Z0-9]+).*?(LT\d+)\.(PON\d+)/i;
   const match = texto.match(regex);
 
   if (!match) {
-    return "Não foi possível identificar OLT/LT/PON.";
+    return "Não foi possível identificar OLT/LT/PON no alarme.";
   }
 
   const olt = match[1].toUpperCase();
@@ -174,7 +33,7 @@ GPON: ${olt}
 Nenhuma correspondência encontrada.`;
   }
 
-  const linhas = encontrados
+  const resultado = encontrados
     .map((item) => {
       const implantacao = item["ID Implantação"] || "SEM ID IMPLANTAÇÃO";
       return `${olt}:R1.S1.${lt}.${pon} - ${implantacao}`;
@@ -184,7 +43,8 @@ Nenhuma correspondência encontrada.`;
   return `Indisponibilidade em rede PRIMARIA:
 GPON: ${olt}
 
-${linhas}`;
+
+${resultado}`;
 }
 
 export default function App() {
@@ -221,6 +81,10 @@ export default function App() {
     carregarCSV();
   }, []);
 
+  function processar() {
+    setSaida(analisarPrimaria(entrada, dados));
+  }
+
   function limpar() {
     setEntrada("");
     setSaida("");
@@ -243,7 +107,7 @@ export default function App() {
     >
       <div
         style={{
-          maxWidth: 1100,
+          maxWidth: 1000,
           margin: "0 auto",
           background: "white",
           padding: 24,
@@ -251,12 +115,12 @@ export default function App() {
           boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
         }}
       >
-        <h1 style={{ marginBottom: 20 }}>📡 NOC Toolkit + AMS5520</h1>
+        <h1>🌐 Consulta AMS5520 / Horizon</h1>
 
         <textarea
           value={entrada}
           onChange={(e) => setEntrada(e.target.value)}
-          placeholder="Cole alarmes, logs ou consultas"
+          placeholder="Cole aqui o alarme GPON"
           style={{
             width: "100%",
             height: 180,
@@ -267,26 +131,8 @@ export default function App() {
           }}
         />
 
-        <div
-          style={{
-            display: "flex",
-            gap: 12,
-            flexWrap: "wrap",
-            marginBottom: 20,
-          }}
-        >
-          <button onClick={() => setSaida(gerarCarimbo(entrada))}>
-            📄 Gerar Carimbo
-          </button>
-
-          <button onClick={() => setSaida(analisarAlarmes(entrada))}>
-            📊 Analisar Alarmes
-          </button>
-
-          <button onClick={() => setSaida(analisarPrimaria(entrada, dados))}>
-            🌐 Analisar Primária
-          </button>
-
+        <div style={{ display: "flex", gap: 12, marginBottom: 20 }}>
+          <button onClick={processar}>Pesquisar</button>
           <button onClick={copiar}>📋 Copiar</button>
           <button onClick={limpar}>🗑️ Limpar</button>
         </div>
@@ -297,7 +143,7 @@ export default function App() {
           placeholder="Resultado aparecerá aqui"
           style={{
             width: "100%",
-            height: 420,
+            height: 350,
             padding: 12,
             borderRadius: 8,
             border: "1px solid #ccc",
