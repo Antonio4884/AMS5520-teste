@@ -1,17 +1,24 @@
 import React, { useEffect, useState } from "react";
 
+// 🔥 NORMALIZA QUALQUER FORMATO DE PORTA
+function normalizarPorta(p) {
+  return (p || "")
+    .replace(/\s+/g, "")
+    .replace(/\r/g, "")
+    .replace(/\n/g, "")
+    .trim();
+}
+
 function analisar({ olt, porta, indexPorta, hht }) {
   if (!olt || !porta) {
     return "Preencha OLT e PORTA.";
   }
 
-  // 🔥 OLTs múltiplas
   const olts = olt
     .split(",")
     .map((o) => o.trim().toUpperCase())
     .filter(Boolean);
 
-  // 🔥 portas múltiplas (ENTER ou vírgula)
   const portas = porta
     .split(/\n|,/)
     .map((p) => p.trim())
@@ -29,8 +36,9 @@ function analisar({ olt, porta, indexPorta, hht }) {
     const pon = partes[3];
     const ont = partes[4];
 
-    // 🔥 busca automática ID Implantação pela porta
-    const idImplantacao = indexPorta[p] || "SEM ID IMPLANTAÇÃO";
+    // 🔥 BUSCA NORMALIZADA
+    const idImplantacao =
+      indexPorta[normalizarPorta(p)] || "SEM ID IMPLANTAÇÃO";
 
     // ---------------- PRIMÁRIA ----------------
     if (!ont) {
@@ -79,7 +87,6 @@ export default function App() {
   const [hht, setHht] = useState("");
   const [saida, setSaida] = useState("");
 
-  const [dados, setDados] = useState([]);
   const [indexPorta, setIndexPorta] = useState({});
 
   // ---------------- CARREGAR CSV ----------------
@@ -91,7 +98,6 @@ export default function App() {
       const linhas = text.split("\n").filter(Boolean);
       const headers = linhas[0].split(",");
 
-      const rows = [];
       const index = {};
 
       linhas.slice(1).forEach((linha) => {
@@ -102,16 +108,14 @@ export default function App() {
           obj[header.trim()] = (valores[i] || "").trim();
         });
 
-        rows.push(obj);
-
-        // 🔥 INDEXAÇÃO POR PORTA
         const porta = obj["Porta"];
+        const id = obj["ID Implantação"];
+
         if (porta) {
-          index[porta.trim()] = obj["ID Implantação"];
+          index[normalizarPorta(porta)] = id;
         }
       });
 
-      setDados(rows);
       setIndexPorta(index);
     }
 
