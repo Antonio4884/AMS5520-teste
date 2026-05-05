@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 
-// 🔥 NORMALIZA QUALQUER FORMATO DE PORTA
+// 🔥 NORMALIZA PORTA
 function normalizarPorta(p) {
   return (p || "")
     .replace(/\s+/g, "")
@@ -38,14 +38,10 @@ function analisar({ olt, porta, indexPorta, hht }) {
 
     const isSecundaria = partes.length >= 5;
 
-    // 🔑 chave normalizada (PRIMÁRIA OU SECUNDÁRIA)
-    const portaKey = normalizarPorta(
-      isSecundaria
-        ? `${partes[0]}/${partes[1]}/${partes[2]}/${partes[3]}/${partes[4]}`
-        : `${partes[0]}/${partes[1]}/${partes[2]}/${partes[3]}`
-    );
+    // 🔑 chave correta (OLT + PORTA)
+    const baseKey = `${olts[0]}|${normalizarPorta(p)}`;
 
-    const dadosCliente = indexPorta[portaKey] || {};
+    const dadosCliente = indexPorta[baseKey] || {};
     const idImplantacao = dadosCliente.idImplantacao || "SEM ID IMPLANTAÇÃO";
     const customerId = dadosCliente.customerId || "SEM CUSTOMER ID";
 
@@ -66,7 +62,6 @@ function analisar({ olt, porta, indexPorta, hht }) {
     }
   });
 
-  // ---------------- SAÍDA PRIMÁRIA ----------------
   if (linhasPrimaria.length > 0 && linhasSecundaria.length === 0) {
     return `Indisponibilidade em rede PRIMARIA:
 GPON: ${olts.join(", ")}
@@ -75,7 +70,6 @@ GPON: ${olts.join(", ")}
 ${linhasPrimaria.join("\n")}`;
   }
 
-  // ---------------- SAÍDA SECUNDÁRIA ----------------
   if (linhasSecundaria.length > 0) {
     return `Indisponibilidade em rede SECUNDARIA - Com afetação
 GPON: ${olts.join(", ")}
@@ -95,7 +89,6 @@ export default function App() {
   const [porta, setPorta] = useState("");
   const [hht, setHht] = useState("");
   const [saida, setSaida] = useState("");
-
   const [indexPorta, setIndexPorta] = useState({});
 
   // ---------------- CARREGAR CSV ----------------
@@ -111,20 +104,21 @@ export default function App() {
 
       linhas.slice(1).forEach((linha) => {
         const valores = linha.split(",");
-        const obj = {};
 
+        const obj = {};
         headers.forEach((header, i) => {
           obj[header.trim()] = (valores[i] || "").trim();
         });
 
-        const porta = obj["Porta"];
-        const idImplantacao = obj["ID Implantação"];
-        const customerId = obj["Customer ID"];
+        const olt = obj["OLT"]?.trim();
+        const porta = obj["Porta"]?.trim();
 
-        if (porta) {
-          index[normalizarPorta(porta)] = {
-            idImplantacao,
-            customerId,
+        if (olt && porta) {
+          const key = `${olt.toUpperCase()}|${normalizarPorta(porta)}`;
+
+          index[key] = {
+            idImplantacao: obj["ID Implantação"],
+            customerId: obj["Customer ID"],
           };
         }
       });
@@ -140,14 +134,14 @@ export default function App() {
       <h2>Gerador de Carimbo NOC</h2>
 
       <input
-        placeholder="OLT (ex: OLTCTA21, OLTCTA22)"
+        placeholder="OLT (ex: OLTCTA11)"
         value={olt}
         onChange={(e) => setOlt(e.target.value)}
         style={{ width: "100%", marginBottom: 10 }}
       />
 
       <textarea
-        placeholder="PORTA (ex: 1/1/15/7 ou 1/1/15/7/10)"
+        placeholder="PORTA (ex: 1/1/9/4 ou 1/1/9/4/9)"
         value={porta}
         onChange={(e) => setPorta(e.target.value)}
         style={{ width: "100%", height: 120, marginBottom: 10 }}
@@ -160,7 +154,11 @@ export default function App() {
         style={{ width: "100%", height: 120, marginBottom: 10 }}
       />
 
-      <button onClick={() => setSaida(analisar({ olt, porta, indexPorta, hht }))}>
+      <button
+        onClick={() =>
+          setSaida(analisar({ olt, porta, indexPorta, hht }))
+        }
+      >
         Gerar
       </button>
 
