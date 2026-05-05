@@ -1,16 +1,26 @@
 import React, { useEffect, useState } from "react";
 
-function analisarPrimaria(texto, dados) {
-  const regex = /(OLT[A-Z0-9]+).*?(LT\d+)\.(PON\d+)/i;
+function extrairDadosGPON(texto) {
+  const regex = /(OLT[A-Z0-9]+):R1\.S1\.(LT\d+)\.(PON\d+)/i;
   const match = texto.match(regex);
 
-  if (!match) {
-    return "Não foi possível identificar OLT/LT/PON no alarme.";
+  if (!match) return null;
+
+  return {
+    olt: match[1].toUpperCase(),
+    lt: match[2].toUpperCase(),
+    pon: match[3].toUpperCase(),
+  };
+}
+
+function analisarAlarme(texto, dados) {
+  const info = extrairDadosGPON(texto);
+
+  if (!info) {
+    return "Não foi possível identificar OLT/LT/PON.";
   }
 
-  const olt = match[1].toUpperCase();
-  const lt = match[2].toUpperCase();
-  const pon = match[3].toUpperCase();
+  const { olt, lt, pon } = info;
 
   const numeroLT = lt.replace("LT", "");
   const numeroPON = pon.replace("PON", "");
@@ -27,24 +37,27 @@ function analisarPrimaria(texto, dados) {
   });
 
   if (!encontrados.length) {
-    return `Indisponibilidade em rede PRIMARIA:
-GPON: ${olt}
-
-Nenhuma correspondência encontrada.`;
+    return `Nenhuma correspondência encontrada para:
+${olt} ${lt} ${pon}`;
   }
 
-  const resultado = encontrados
-    .map((item) => {
-      const implantacao = item["ID Implantação"] || "SEM ID IMPLANTAÇÃO";
-      return `${olt}:R1.S1.${lt}.${pon} - ${implantacao}`;
-    })
-    .join("\n");
+  const implantacoes = encontrados.map(
+    (item) => item["ID Implantação"] || "SEM ID IMPLANTAÇÃO"
+  );
 
-  return `Indisponibilidade em rede PRIMARIA:
+  const descricao = [...new Set(implantacoes)].join("\n");
+
+  const tipo = texto.includes("ONT:")
+    ? "SECUNDARIA"
+    : texto.includes("PON Port:")
+    ? "PRIMARIA"
+    : "GPON";
+
+  return `Indisponibilidade em rede ${tipo}:
 GPON: ${olt}
 
 
-${resultado}`;
+${olt}:R1.S1.${lt}.${pon} - ${descricao}`;
 }
 
 export default function App() {
@@ -74,7 +87,7 @@ export default function App() {
 
         setDados(rows);
       } catch (error) {
-        console.error("Erro ao carregar CSV:", error);
+        console.error(error);
       }
     }
 
@@ -82,7 +95,7 @@ export default function App() {
   }, []);
 
   function processar() {
-    setSaida(analisarPrimaria(entrada, dados));
+    setSaida(analisarAlarme(entrada, dados));
   }
 
   function limpar() {
@@ -115,15 +128,15 @@ export default function App() {
           boxShadow: "0 10px 25px rgba(0,0,0,0.1)",
         }}
       >
-        <h1>🌐 Consulta AMS5520 / Horizon</h1>
+        <h1>AMS5520 / Horizon</h1>
 
         <textarea
           value={entrada}
           onChange={(e) => setEntrada(e.target.value)}
-          placeholder="Cole aqui o alarme GPON"
+          placeholder="Cole alarmes GPON aqui"
           style={{
             width: "100%",
-            height: 180,
+            height: 200,
             padding: 12,
             borderRadius: 8,
             border: "1px solid #ccc",
@@ -140,10 +153,9 @@ export default function App() {
         <textarea
           value={saida}
           readOnly
-          placeholder="Resultado aparecerá aqui"
           style={{
             width: "100%",
-            height: 350,
+            height: 320,
             padding: 12,
             borderRadius: 8,
             border: "1px solid #ccc",
